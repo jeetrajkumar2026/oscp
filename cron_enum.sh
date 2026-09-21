@@ -95,12 +95,51 @@ done
 find /etc/cron* -type f -perm -002 2>/dev/null
 echo ""
 
-echo -e "${CYAN}[9] Active systemd timers${NC}"
+echo -e "${CYAN}[9] Modifiable root scripts referenced by cron (exploitable)${NC}"
+echo "--------------------------------------------"
+echo -e "${CYAN}Command reference (run manually):${NC}"
+echo "  cat /etc/crontab"
+echo "  cat /etc/cron.d/*"
+echo "  ls -la /etc/cron.*"
+echo "  ls -la <script_path>"
+echo ""
+
+# Parse script paths from /etc/crontab and /etc/cron.d/*
+CRON_SCRIPTS=$(
+    (grep -oE '^[^#].*[[:space:]]+[0-9a-zA-Z_/-]+\.[^[:space:]]+' /etc/crontab 2>/dev/null; \
+     cat /etc/cron.d/* 2>/dev/null | grep -oE '^[^#].*[[:space:]]+[0-9a-zA-Z_/-]+\.[^[:space:]]+') | \
+    awk '{for(i=1;i<=NF;i++) if($i ~ /\// && $i ~ /\./) print $i}' | sort -u
+)
+
+# Also check scripts directly inside cron directories
+for d in /etc/cron.hourly /etc/cron.daily /etc/cron.weekly /etc/cron.monthly; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+        [ -f "$f" ] && echo "$f"
+    done
+done >> /tmp/cron_script_list_$$
+
+for script in $CRON_SCRIPTS $(cat /tmp/cron_script_list_$$ 2>/dev/null | sort -u); do
+    [ -e "$script" ] || continue
+    owner=$(stat -c '%u' "$script" 2>/dev/null || echo "?")
+    perms=$(stat -c '%a' "$script" 2>/dev/null || echo "?")
+    if [ "$owner" = "0" ] && [ -w "$script" ]; then
+        echo -e "${RED}[!] EXPLOITABLE: $script is root-owned and writable by you${NC}"
+        echo "    Owner: root | Permissions: $perms | Command: ls -la $script"
+    elif [ "$owner" = "0" ] && [ "$perms" -ge 666 ] 2>/dev/null; then
+        echo -e "${RED}[!] EXPLOITABLE: $script is root-owned and world-writable${NC}"
+        echo "    Owner: root | Permissions: $perms | Command: ls -la $script"
+    fi
+done
+rm -f /tmp/cron_script_list_$$
+echo ""
+
+echo -e "${CYAN}[10] Active systemd timers${NC}"
 echo "--------------------------------------------"
 systemctl list-timers --all 2>/dev/null | head -30
 echo ""
 
-echo -e "${CYAN}[10] Recent cron / at activity (last 50 lines)${NC}"
+echo -e "${CYAN}[11] Recent cron / at activity (last 50 lines)${NC}"
 echo "--------------------------------------------"
 grep -i cron /var/log/syslog 2>/dev/null | tail -50
 grep -i cron /var/log/messages 2>/dev/null | tail -50

@@ -71,13 +71,45 @@ for f in $(find /etc /opt /var /home /tmp /usr/local -type f \( -name '*.sh' -o 
 done
 echo ""
 
+echo -e "${CYAN}[9] Modifiable root-owned scripts (exploitable)${NC}"
+echo "--------------------------------------------"
+echo -e "${CYAN}Command reference (run manually):${NC}"
+echo "  find / -type f -uid 0 -perm -002 ! -path '/proc/*' ! -path '/sys/*' ! -path '/dev/*' 2>/dev/null"
+echo "  ls -la <file_path>"
+echo "  file <file_path>"
+echo ""
+
+find / -type f -uid 0 -perm -002 ! -path "/proc/*" ! -path "/sys/*" ! -path "/dev/*" 2>/dev/null | while read -r f; do
+    echo -e "${RED}[!] EXPLOITABLE: $f is root-owned and world-writable${NC}"
+    echo "    Command: ls -la $f"
+    echo "    Command: file $f"
+done
+
+echo ""
+
+echo -e "${CYAN}[10] Writable files owned by root for current user${NC}"
+echo "--------------------------------------------"
+echo -e "${CYAN}Command reference (run manually):${NC}"
+echo "  find / -type f -uid 0 -writable ! -path '/proc/*' ! -path '/sys/*' ! -path '/dev/*' 2>/dev/null"
+echo "  ls -la <file_path>"
+echo ""
+
+find / -type f -uid 0 -writable ! -path "/proc/*" ! -path "/sys/*" ! -path "/dev/*" 2>/dev/null | head -50 | while read -r f; do
+    echo -e "${RED}[!] EXPLOITABLE: $f is root-owned and writable by you${NC}"
+    echo "    Command: ls -la $f"
+    echo "    Command: file $f"
+done
+echo ""
+
 echo "============================================"
 echo "  Enumeration Report Complete"
 echo "============================================"
 echo ""
 echo -e "${CYAN}Manual checks to perform:${NC}"
+echo "  - [9] Modifiable root-owned scripts (world-writable): directly exploitable"
+echo "  - [10] Root-owned files writable by current user: directly exploitable"
 echo "  - Verify writable PATH dirs are exploitable: create test binary"
-echo "  - Inspect writable scripts: could an admin run them?"
+echo "  - Inspect writable scripts: could an admin or cron run them?"
 echo "  - Check crontab / systemd timers calling writable scripts"
 echo "  - Look for SUID binaries calling missing binaries without full path"
 echo ""
