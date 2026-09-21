@@ -120,15 +120,17 @@ for d in /etc/cron.hourly /etc/cron.daily /etc/cron.weekly /etc/cron.monthly; do
 done >> /tmp/cron_script_list_$$
 
 for script in $CRON_SCRIPTS $(cat /tmp/cron_script_list_$$ 2>/dev/null | sort -u); do
-    [ -e "$script" ] || continue
+    [ -f "$script" ] || continue
     owner=$(stat -c '%u' "$script" 2>/dev/null || echo "?")
     perms=$(stat -c '%a' "$script" 2>/dev/null || echo "?")
     if [ "$owner" = "0" ] && [ -w "$script" ]; then
-        echo -e "${RED}[!] EXPLOITABLE: $script is root-owned and writable by you${NC}"
+        echo -e "${RED}[!] EXPLOITABLE: $script is root-owned and writable by current user (user-writable)${NC}"
         echo "    Owner: root | Permissions: $perms | Command: ls -la $script"
-    elif [ "$owner" = "0" ] && [ "$perms" -ge 666 ] 2>/dev/null; then
+        echo "    Command: file $script"
+    elif [ "$owner" = "0" ] && [ "$((perms % 10 & 2))" -ne 0 ] 2>/dev/null; then
         echo -e "${RED}[!] EXPLOITABLE: $script is root-owned and world-writable${NC}"
         echo "    Owner: root | Permissions: $perms | Command: ls -la $script"
+        echo "    Command: file $script"
     fi
 done
 rm -f /tmp/cron_script_list_$$
