@@ -71,8 +71,22 @@ for f in $(find /etc /opt /var/www /var/spool /home /usr/local /tmp -type f \( -
     if [ -r "$f" ]; then
         NO_PATH=$(grep -nE '^[[:space:]]*[a-zA-Z0-9_][a-zA-Z0-9_-]*[[:space:]]' "$f" 2>/dev/null | \
             grep -vE '^\s*[0-9]+:\s*(if|then|else|fi|for|while|do|done|case|esac|echo|export|source|\.|#|/|function|\[|return|local|set|unset|trap|wait|read|umask|ulimit|cd|pwd|exit|kill|jobs|bg|fg|disown|suspend|times|type|hash|alias|unalias|bind|builtin|caller|command|declare|enable|exec|getopts|help|let|mapfile|popd|printf|pushd|select|shift|shopt|test|true|false|continue|break)' | \
-            grep -vE '/' | head -20)
-        if [ -n "$NO_PATH" ]; then
+            grep -vE '/')
+
+        # Filter out shell builtins, keywords, aliases, and functions
+        EXTERNAL_ONLY=""
+        while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            # Extract the bare command name from the line
+            cmd=$(echo "$line" | sed -E 's/^\s*[0-9]+:\s*([a-zA-Z0-9_][a-zA-Z0-9_-]*).*/\1/')
+            [ -n "$cmd" ] || continue
+            ctype=$(type -t "$cmd" 2>/dev/null || echo "")
+            if [ "$ctype" = "file" ]; then
+                EXTERNAL_ONLY="${EXTERNAL_ONLY}${line}\n"
+            fi
+        done <<< "$NO_PATH"
+
+        if [ -n "$EXTERNAL_ONLY" ]; then
             echo -e "${YELLOW}[!] $f may call binaries without full path${NC}"
             echo "$f" >> "$SCRIPT_LIST"
         fi
@@ -88,7 +102,8 @@ echo ""
 EXPLOITABLE_FOUND=0
 
 # Check if any writable PATH directories exist
-ALL_WRITABLE_DIRS=$(find / -type d -writable ! -path "/proc/*" ! -path "/sys/*" ! -path "/dev/*" 2>/dev/null | head -100)
+# Exclude /run/user/* (per-user tmpfs runtime dirs not in root/cron PATH)
+ALL_WRITABLE_DIRS=$(find / -type d -writable ! -path "/proc/*" ! -path "/sys/*" ! -path "/dev/*" ! -path "/run/user/*" 2>/dev/null | head -100)
 
 if [ -z "$ALL_WRITABLE_DIRS" ]; then
     echo -e "${YELLOW}[-] No writable directories found on system — PATH hijack not possible${NC}"
@@ -107,9 +122,14 @@ else
             sort -u)
 
         for cmd in $BARE_CMDS; do
-            # Check if this command exists as a real binary (not just a shell builtin)
-            CMD_PATH=$(command -v "$cmd" 2>/dev/null)
+            # Skip shell builtins, keywords, aliases, and functions
+            ctype=$(type -t "$cmd" 2>/dev/null || echo "")
+            [ "$ctype" = "file" ] || continue
+
+            # Check if this command is an external binary (type -P ignores shell builtins/keywords)
+            CMD_PATH=$(type -P "$cmd" 2>/dev/null)
             [ -z "$CMD_PATH" ] && continue
+            [ -x "$CMD_PATH" ] || continue
 
             # Check if any writable directory could be used to hijack this command
             for wdir in $ALL_WRITABLE_DIRS; do
@@ -119,7 +139,7 @@ else
                 echo "    Writable dir: $wdir"
                 echo "    Manual verify: cat $script | grep -n '$cmd'"
                 echo "    Manual verify: ls -la $wdir"
-                echo "    Manual verify: command -v $cmd"
+                echo "    Manual verify: type -P $cmd"
                 echo ""
                 EXPLOITABLE_FOUND=1
                 break  # One writable dir is enough per command
@@ -151,12 +171,15 @@ while read -r script; do
             sort -u)
 
         for cmd in $BARE_CMDS; do
-            CMD_PATH=$(command -v "$cmd" 2>/dev/null)
+            ctype=$(type -t "$cmd" 2>/dev/null || echo "")
+            [ "$ctype" = "file" ] || continue
+            CMD_PATH=$(type -P "$cmd" 2>/dev/null)
             [ -z "$CMD_PATH" ] && continue
+            [ -x "$CMD_PATH" ] || continue
             echo -e "${RED}[!] ROOT SCRIPT: $script calls '$cmd' (no full path)${NC}"
             echo "    Owner: root | Permissions: $perms"
             echo "    Command: cat $script | grep -n '$cmd'"
-            echo "    Command: command -v $cmd"
+            echo "    Command: type -P $cmd"
             echo ""
         done
     fi
